@@ -1,0 +1,245 @@
+---
+title: "A first glance at functional method"
+output:
+  html_notebook: default
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+### 数据读入
+过滤掉数值大于1000的异常值
+
+```{r}
+Loadmax = read.csv("/Users/bailujia/Desktop/电力数据/LOADmax.csv",stringsAsFactors = FALSE)[,c(2,3)]
+Loadmax$DATE <-as.Date(Loadmax$DATE)  #日最大值
+big <- which(Loadmax$LOAD > 1000)     #异常值
+sum(Loadmax$DATE> as.Date("2017-01-01"))
+weather<- read.csv("/Users/bailujia/Desktop/电力数据/TL.csv",stringsAsFactors = FALSE)
+weather$DATE = as.Date(weather$DATE)  #天气
+```
+
+- powerload : 288*731 每天288个时间点 
+
+```{r}
+library(dplyr)
+N = 288 
+powerload<-matrix(0,ncol=731,nrow=N)
+I = seq(1,24*60,by=5)
+s=1
+
+for( yr in 2015:2016)
+{
+dir<-paste("/Users/bailujia/Desktop/电力数据/负荷数据/",yr,"年",sep="")
+filesmonth<-list.files(dir)
+for( i in 1:12)
+{
+dir1<-paste(dir,"/",filesmonth[i],sep="")
+filesday<-list.files(dir1)
+  for(j in 1:length(filesday))
+  {
+    dir2<-paste(dir1,"/",filesday[j],sep="")
+    elec<-read.csv(dir2,
+                   header = TRUE,sep=",",stringsAsFactors = FALSE,
+                   fileEncoding="GBK")[,-3]
+    elec = elec[I,]
+    w<-which(elec[,2]>1000)
+    elec[w,2]<-NA
+    w<-which(is.na(elec[,2]))
+    elec[w,2]<-mean(elec[c(w-1,w+1),2],na.rm=TRUE)
+    powerload[,s] = elec[,2]
+    s=s+1
+  }
+}
+}
+```
+
+
+```{r}
+powerload=data.frame(powerload)
+
+Loadmax[big,2]<-apply(powerload[,big],2,max)
+Pyd = Loadmax[Loadmax$DATE > as.Date(paste(2015,1,"01",sep="-"))
+              & Loadmax$DATE <= as.Date(paste(2017,1,"01",sep="-")),]
+
+#Tem = weather[weather$DATE > as.Date(paste(2015,1,"01",sep="-"))
+ #             & weather$DATE < as.Date(paste(2017,1,"01",sep="-")),3]
+powerload<-cbind(Pyd,t(powerload))
+```
+
+```{r}
+y = as.matrix(powerload[,-(1:2)])
+ncol(y)
+```
+
+### 创建B样条basis 画出拟合的光滑曲线
+
+```{r}
+n=60
+library(fda)
+bbasis = create.bspline.basis(c(0,ncol(y)),n,norder = 4)
+tempfdPar = fdPar(bbasis,int2Lfd(2),100)                #functional parameter object
+tempfd = smooth.basis(1:ncol(y),t(y[-1,]),tempfdPar)    #fit with curves
+firstd = deriv.fd(tempfd$fd,1)                          #derivatives
+tempfd1 = smooth.basis(1:(ncol(y)),t(y[-nrow(y),]),tempfdPar) #lag1
+```
+
+```{r}
+plot(tempfd$fd,xlab='Time point',ylab='load pattern',cex.lab=0.75,cex.axis=0.5)
+```
+
+
+```{r}
+load = as.vector(powerload$LOAD)
+
+templist      = vector("list",3)
+templist[[1]] = rep(1,nrow(y)-1)  #constant
+templist[[2]] = tempfd$fd         #
+templist[[3]] = tempfd1$fd
+#templist[[4]] = Tem
+
+conbasis   = create.constant.basis(c(0,ncol(y)))
+nbasis = 5
+betabasis = create.bspline.basis(c(0,ncol(y)),nbasis)
+betalist1  = vector("list",3)
+betalist1[[1]] = conbasis
+betalist1[[2]] = betabasis
+betalist1[[3]] = betabasis
+#betalist1[[4]] = conbasis
+
+
+fRegressList1 = fRegress(load[-1],templist,betalist1)
+betaestlist1  = fRegressList1$betaestlist
+#length(betaestlist1)
+# betaestlist1 has two elements. The first element is the intercept
+# The second element is the slope beta(t)
+
+# obtain beta(t)
+tempbetafd1   = betaestlist1[[2]]$fd
+tempbetafd2   = betaestlist1[[3]]$fd
+
+par(mfrow=c(2,1),mar = c(4, 4, 1, 1))
+plot(tempbetafd1, xlab="/5minutes", ylab="Beta1")
+plot(tempbetafd2, xlab="/5minutes", ylab="Beta2")
+```
+```{r}
+powerload1<-matrix(0,ncol= 365,nrow= N)
+s=1
+dir<-paste("/Users/bailujia/Desktop/电力数据/负荷数据/",2017,"年",sep="")
+filesmonth<-list.files(dir)
+for( i in 1:12)
+{
+dir1<-paste(dir,"/",filesmonth[i],sep="")
+filesday<-list.files(dir1)
+  for(j in 1:length(filesday))
+  {
+    dir2<-paste(dir1,"/",filesday[j],sep="")
+    elec<-read.csv(dir2,
+                   header = TRUE,sep=",",stringsAsFactors = FALSE,
+                   fileEncoding="GBK")[,-3]
+    elec = elec[I,]
+    w<-which(is.na(elec[,2]))
+    elec[w,2]<-mean(elec[c(w-1,w+1),2],na.rm=TRUE)
+    
+    powerload1[,s] = elec[,2]
+    s=s+1
+  }
+}
+```
+
+```{r}
+y = as.matrix(t(powerload1))
+ncol(y)
+
+bbasis = create.bspline.basis(c(0,ncol(y)),n,norder = 4)
+tempfdPar = fdPar(bbasis,int2Lfd(2),100)
+tempfd = smooth.basis(1:ncol(y),t(y[-1,]),tempfdPar)
+firstd = deriv.fd(tempfd$fd,1)
+tempfd1 = smooth.basis(1:(ncol(y)),t(y[-nrow(y),]),tempfdPar)
+
+plot(tempfd$fd,xlab='Time point',ylab='load pattern',cex.lab=0.75,cex.axis=0.5)
+#Tem1<-weather[weather$DATE > as.Date(paste(2017,1,"01",sep="-"))
+#              & weather$DATE < as.Date(paste(2018,1,"01",sep="-")),3]
+
+templist      = vector("list",3)
+templist[[1]] = rep(1,nrow(y)-1)
+templist[[2]] = tempfd$fd
+templist[[3]] = tempfd1$fd
+#templist[[4]] = Tem1
+
+onebasis <- create.constant.basis(c(0,ncol(y)))
+templist[[1]] <- fd(matrix(templist[[1]],1,1), onebasis)
+#templist[[4]] <- fd(matrix(templist[[4]],1,1), onebasis)
+templistNew <-templist
+```
+
+```{r}
+yhatmat <- matrix(0,nrow(y)-1,1)
+
+# loop through covariates
+p <- length(templistNew)
+for(j in 1:p){
+    xfdj       <- templistNew[[j]]
+    xbasis     <- xfdj$basis
+    xnbasis    <- xbasis$nbasis
+    xrng       <- xbasis$rangeval
+    nfine      <- max(501,10*xnbasis+1)
+    tfine      <- seq(xrng[1], xrng[2], len=nfine)
+    deltat     <- tfine[2]-tfine[1]
+    xmat       <- eval.fd(tfine, xfdj)
+    betafdParj <- betaestlist1[[j]]         #2015-2016得到的系数
+    betafdj    <- betafdParj$fd
+    betamat    <- eval.fd(tfine, betafdj)
+    # estimate int(x*beta) via trapezoid rule
+    fitj       <- as.numeric(deltat*(crossprod(xmat,betamat) - 
+                      0.5*(outer(xmat[1,],betamat[1,]) +
+              outer(xmat[nfine,],betamat[nfine,]))))
+    yhatmat    <- yhatmat + fitj
+}
+```
+
+```{r}
+
+library(ggplot2)
+ggplot()+geom_line(aes(x = Loadmax[Loadmax$DATE > as.Date("2017-01-02"),1],
+                       y= yhatmat[-364],col="Predict load"))+
+  geom_line(aes(x = Loadmax[Loadmax$DATE > as.Date("2017-01-02"),1],
+                       y=Loadmax[Loadmax$DATE > as.Date("2017-01-02"),2],col="Real load"),)
+  
+```
+
+```{r}
+library(data.table)
+realload <- Loadmax[Loadmax$DATE > as.Date("2017-01-02"),2]
+realdate <- Loadmax[Loadmax$DATE > as.Date("2017-01-02"),1]
+
+#on test set
+error <- abs(yhatmat[-364]-realload)/realload 
+#on training set
+errorin<- abs(fRegressList1$yhatfdobj-powerload$LOAD[-1])/powerload$LOAD[-1]
+
+ggplot()+geom_boxplot(aes(x=as.factor(month(realdate)),y=error,group = month(realdate)))
+ggplot()+geom_boxplot(aes(x=as.factor(month(powerload$DATE[-1])),y=errorin,group = month(powerload$DATE[-1])))
+
+```
+
+### 统计量
+
+```{r}
+mean(error)
+sd(error)
+yhatmat[match(max(yhatmat),yhatmat)-1]
+Loadmax[Loadmax$DATE > as.Date("2017-01-02"),1][match(max(yhatmat),yhatmat)]
+Loadmax[match(max(Loadmax$LOAD),Loadmax$LOAD),]
+
+
+print("5%")
+sum(error<0.05)/length(error)
+print("10%")
+sum(error<0.1)/length(error)
+```
+```{r}
+sd(errorin)
+```
+
