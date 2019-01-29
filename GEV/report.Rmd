@@ -1,0 +1,798 @@
+---
+title: "Report"
+author: "Bailujia"
+date: "2018/7/8"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning=FALSE,cache=TRUE)
+```
+
+### 读取数据 2015-2017
+```{r,warning=FALSE,echo = FALSE}
+library(stringr)
+#声明存储的变量frame 两个变量 日期(字符型)和用电量极值(数值型)
+frame<-data.frame(DATE = character(), LOAD = numeric())
+
+for(year in 2015:2017)
+{ 
+  #这里是年份文件夹的地址 应该更改为电脑上实际的地址
+dir<-paste("/Users/bailujia/Desktop/电力数据/负荷数据/",year,"年",sep="")
+ #得到文件夹内的月份文件夹
+filesmonth<-list.files(dir)
+for(i in 1:length(filesmonth))
+{
+  dir1<-paste(dir,"/",filesmonth[i],sep="")
+  #得到文件夹内的文件
+  filesday<-list.files(dir1)
+  for(j in 1: length(filesday))
+  {
+    #实际的文件完整地址
+    dir2<-paste(dir1,"/",filesday[j],sep="")
+    #读取文件
+    elec<-read.csv(dir2,
+                   header = TRUE,sep=",",stringsAsFactors = FALSE,
+                   fileEncoding="GB18030")[,-3]
+    DATE<-gsub(".csv" ,"",filesday[j])
+    #剔除异常值（特别大的值） 
+    w<-which(elec[,2]>1000)
+    elec[w,2]<-0
+    # 筛选极值
+    LOAD<-max(elec[,2],na.rm = TRUE) 
+    # 
+    frame0<-data.frame(DATE=DATE,LOAD=LOAD)
+    frame<-rbind(frame,frame0)
+  }
+}
+}
+```
+
+### 读取数据 2018
+这里另外读取是因为2018年数据是后来提供，存储方式也略有不同
+```{r,message=FALSE}
+data2018<-data.frame(DATE = character(), LOAD = numeric())
+filenew<-list.files("/Users/bailujia/Desktop/电力数据/负荷")
+# 路径更改为数据地址 执行的时候会有提示：路径更改只在本个单元(chunk)内有效
+setwd("/Users/bailujia/Desktop/电力数据/负荷")
+for(i in 1:length(filenew))
+{
+  filesday<-filenew[i]
+  elec<-read.csv(filesday,
+                   header = TRUE,sep=",",stringsAsFactors = FALSE,
+                   fileEncoding="GB18030")[,-3]
+  DATE<-gsub(".csv" ,"",filesday)
+  w<-which(elec[,2]>1000)
+  elec[w,2]<-0
+  LOAD<-max(elec[,2],na.rm = TRUE) #极值
+  frame0<-data.frame(DATE=DATE,LOAD=LOAD)
+  data2018<-rbind(data2018,frame0)
+}
+
+frame<-rbind(frame,data2018)
+
+```
+### 时间格式化
+```{r,message=FALSE}
+library(lubridate)
+frame$DATE<-ymd(as.character(frame$DATE)) #时间格式化
+frame<-na.omit(frame)
+```
+
+### 用电量变化可视化
+```{r}
+#加载两个包 可能需要额外安装
+library(ggthemr)
+library(ggplot2)
+#设置作图配色版式
+ggthemr_reset()
+ggthemr("fresh",layout ="scientific",type="outer")
+#作图
+ggplot(data=frame)+geom_line(aes(DATE,LOAD))+theme_classic(base_family = "STHeiti")+ylab("用电量")+xlab("日期")
+```
+### 主要统计量
+- 均值 
+- 最大值
+- 最大值出现的日期 
+- 用电量超过300的天数
+- 用电量超过300的天数
+```{r}
+summaryofdata<-function(frame,year)
+{
+  x<-list()
+  #由于最大值出现的日期可能不唯一，这里使用列表存储
+  frameyear<-subset(frame,select = c(LOAD,DATE),
+                  DATE<paste(year+1,"-01-01",sep="")&
+                    DATE>=paste(year,"-01-01",sep=""))
+  print(paste(year,"主要统计量"))
+  x$mean = mean(frameyear$LOAD) #均值
+  x$max = max(frameyear$LOAD) #最大值
+  w=which(frameyear$LOAD == x$max)
+  x$maxdate = frameyear$DATE[w] #最大值出现的日期
+  x$over300 = sum(frameyear$LOAD >=300) #用电量超过300的天数
+  x$over400 = sum(frameyear$LOAD >=400) #用电量超过400的天数
+  return(x)
+  
+}
+summaryofdata(frame,2015)
+summaryofdata(frame,2016)
+summaryofdata(frame,2017)
+summaryofdata(frame,2018)
+```
+
+### 读取天气数据2015-2017
+```{r}
+library(openxlsx)
+library(stringr)
+for(year in 2015:2017)
+{
+  tableyear<-paste("table",year,sep="") #生成变量的名称
+  table<-read.csv(paste("/Users/bailujia/Desktop/电力数据/",tableyear,".csv",sep=""),stringsAsFactors = FALSE)
+  assign(tableyear,table)#将变量tablenew赋值给名称为table储存的变量
+  tablenew<-get(tableyear)
+  colnames(tablenew)<-c("DATE","TEMP")
+  tablenew$DATE<-gsub("\n","",tablenew$DATE)
+  w<-which(tablenew$DATE == "                                            日期"  )
+  tablenew<-tablenew[-w,]
+
+  tablenew$DATE<-as.Date(tablenew$DATE,"%Y年%m月%d日")
+  tablenew$TEMP<-gsub("\n","",tablenew$TEMP)
+  tablenew$TEMP<-gsub("℃ ","",tablenew$TEMP)
+  for(i in 1: length(tablenew$TEMP))
+  {
+    w<-unlist(str_split(tablenew$TEMP[i],"/"))
+    tablenew$TOP[i]<-as.numeric(w[1])
+    tablenew$BOT[i]<-as.numeric(w[2])
+  }
+  tablenew<-tablenew[,-2]
+  assign(tableyear,tablenew) #将变量tablenew赋值给名称为tableyear储存的变量
+}
+
+#数据合并
+weather<-table2015
+weather<-rbind(weather,table2016)
+weather<-rbind(weather,table2017)
+
+
+```
+
+### 读取天气数据2018
+这里另外读取是因为2018年数据是后来提供
+```{r,message=FALSE,warning=FALSE}
+#读取已经收集好的天气数据
+tem<-read.csv("/Users/bailujia/Desktop/电力数据/table2018.csv")
+table2018<-tem
+colnames(table2018)<-c("DATE","TEMP")
+#对于数据的清洗
+table2018$DATE<-gsub("\n","",table2018$DATE)
+table2018$DATE<-as.Date(table2018$DATE,"%Y年%m月%d日")
+table2018$TEMP<-gsub("\n","",table2018$TEMP)
+table2018$TEMP<-gsub("℃ ","",table2018$TEMP)
+for(i in 1: length(table2018$TEMP))
+{
+    w<-unlist(str_split(table2018$TEMP[i],"/"))
+    table2018$TOP[i]<-as.numeric(w[1])
+    table2018$BOT[i]<-as.numeric(w[2])
+  }
+table2018<-table2018[,-2]
+table2018<-na.omit(table2018)
+#数据合并
+weather<-rbind(weather,table2018)
+```
+
+### 温度变化可视化
+- 红色为最高温度
+- 蓝色为最低温度
+- 绿色为温度差
+可以看出温差变化不大(可以进一步计算标准差确认)，可以直接使用最高温度代表当天温度的水平
+
+```{r}
+p <- ggplot(table2015)
+p + geom_line(aes(DATE,TOP),col="red",alpha=0.8) +
+  geom_line(aes(DATE,BOT),col="blue",alpha=0.8)+
+  geom_line(aes(DATE,TOP-BOT),col="green",alpha=0.8)+
+  labs(x="日期",y="温度")+
+  theme(plot.title = element_text(hjust = 0.5),text=element_text(family = "STHeiti"))
+```
+
+```{r}
+#将用电量数据和温度数据连接在一起，关键字为DATE
+frame<-unique(merge(frame,weather,by="DATE",all.x = TRUE))
+frame<-na.omit(frame)
+#生成特定滞后阶
+TSextreme<-data.frame(LOAD=frame$LOAD)
+rownames(TSextreme)<-frame$DATE
+TSextreme$lag1 = c(0,TSextreme$LOAD[-nrow(TSextreme)])
+TSextreme$lag2 = c(0,0,TSextreme$LOAD[-((nrow(TSextreme)-1):nrow(TSextreme))])
+TSextreme$lag3 = c(0,0,0,TSextreme$LOAD[-((nrow(TSextreme)-2):nrow(TSextreme))])
+TSextreme$lag7 = c(rep(0,7),TSextreme$LOAD[-((nrow(TSextreme)-6):nrow(TSextreme))])
+TSextreme$lag8 = c(rep(0,8),TSextreme$LOAD[-((nrow(TSextreme)-7):nrow(TSextreme))])
+TSextreme$lag365 = c(rep(0,365),TSextreme$LOAD[-((nrow(TSextreme)-364):nrow(TSextreme))])
+frame$lag1<-TSextreme$lag1 # 1天滞后
+frame$lag2<-TSextreme$lag2
+frame$lag3<-TSextreme$lag3
+frame$lag7<-TSextreme$lag7
+frame$lag8<-TSextreme$lag8 # 8天滞后
+frame$lagt<-c(0,frame$TOP[-((nrow(frame)-0):nrow(frame))])
+frame$lag365<-TSextreme$lag365 #一年滞后
+```
+
+### 用电量和温度的关系可视化
+
+```{r}
+frame2015<-frame[frame$DATE <="2015-12-31",]
+frame2016<-frame[frame$DATE <="2016-12-31" & frame$DATE >"2015-12-31",]
+frame2017<-frame[frame$DATE <="2017-12-31" & frame$DATE >"2016-12-31",]
+frame2018<-frame[frame$DATE <="2018-12-31" & frame$DATE >"2017-12-31",]
+
+p<-ggplot()+
+  geom_point(aes(x=frame2015$TOP,y=frame2015$LOAD,colour=I("red"),alpha=0.3))+
+  #geom_smooth(aes(x=frame2015$TOP,y=frame2015$LOAD,colour=I("red")))+
+  xlab("温度")+guides(alpha="none")+ylab("用电量")+
+  geom_point(aes(x=frame2016$TOP,y=frame2016$LOAD,colour=I("blue"),alpha=0.3))+
+   #geom_smooth(aes(x=frame2016$TOP,y=frame2016$LOAD,colour=I("blue")))+
+  geom_point(aes(x=frame2017$TOP,y=frame2017$LOAD,colour=I("green"),alpha=0.3))+
+  # geom_smooth(aes(x=frame2017$TOP,y=frame2017$LOAD,colour=I("green")))
+  geom_point(aes(x=frame2018$TOP,y=frame2018$LOAD,colour=I("orange"),alpha=0.3))+
+  theme(plot.title = element_text(hjust = 0.5),text=element_text(family = "STHeiti"))
+p
+
+```
+
+## 极值模型
+- GEV模型(广义极值分布)
+<br>
+ $\textrm{GEV}(\mu,\,\sigma,\,\xi)$<br>
+Generalized extreme value distribution<br>
+$\mu \in R — location $位置参数<br>
+$\sigma > 0 — scale$ 尺度参数<br>
+$\xi \in R— shape$形状参数<br>
+ 
+<br>
+ PDF<br>
+$\frac{1}{\sigma}\,t(x)^{\xi+1}e^{-t(x)}$<br>
+where 
+$\begin{cases}t(x)= {\big (}1+\xi ({\tfrac {x-\mu }{\sigma }}){\big )}^{-1/\xi }&{\textrm {if}}\ \xi \neq 0\\e^{-(x-\mu )/\sigma }&{\textrm {if}}\ \xi =0 \end{cases}$
+
+
+- 平稳GEV模型
+Stationary Generalized extreme value distribution<br>
+$\mu,\sigma,\xi$ --constant<br>
+其他变量变化都不会影响分布的三个参数的取值 
+
+- 非平稳GEV
+$\mu,\sigma$ 可能与温度有关 
+
+
+报告中为1天(a)模型
+```{r,warning=FALSE}
+#加载极值模型的软件包
+library(extRemes)
+frameselect<-frame[1:730,]
+fit4 <- fevd(LOAD,data= frameselect[-(1:2),],type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag1+lag2,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+summary(fit4)
+#得到回归后的参数
+parameter4<-fit4$results$par
+```
+
+```{r}
+# 评价函数： 对于极值的一些统计信息
+extrejudge<-function(prediction)
+{
+  extremev<-list()
+  #实际最大值的日期
+  extremev$realhighest<-date(prediction$DATE[match(max(prediction$LOAD),
+                                                   prediction$LOAD)])
+  w<-match(max(prediction$LOAD),prediction$LOAD)  #实际最大值的位置
+  extremev$realloadrh<-max(prediction$LOAD) # 实际最大值
+  extremev$predloadrh<-prediction$pred[w] #实际最大值的日期的预测值
+  #实际最大值的日期的相对误差
+  extremev$ratiorh<-abs(prediction$LOAD[w]-prediction$pred[w])/prediction$LOAD[w]
+  #预测最大值的日期
+  extremev$predhighest<-prediction$DATE[match(max(prediction$pred),prediction$pred)]
+  w<-match(max(prediction$pred),prediction$pred)  #预测最大值的位置
+  extremev$realloadph<-prediction$LOAD[w]  #预测最大值的日期的实际值
+  extremev$predloadph<-prediction$pred[w] #预测最大值的日期的预测值
+  #预测最大值的日期的相对误差
+  extremev$ratioph<-abs(prediction$LOAD[w]-prediction$pred[w])/prediction$LOAD[w]
+  return(extremev)
+}
+
+# 评价函数 包括每天的相对误差和对于极值的一些统计信息(调用了extrejudge）
+judge<-function(prediction)
+{
+  result<-abs(prediction$pred-prediction$LOAD)/prediction$LOAD
+  return(list(result=result,extrvalue=extrejudge(prediction)))
+}
+```
+
+### 预测函数 1天(a)
+```{r}
+# 预测函数 1天(a)
+modepre1<-function(dat,para)
+{
+  #para 是fevd得到的参数
+  #data 数据 包含TOP最高温度，日期和滞后1 2阶用电量
+  for(i in 1:nrow(dat))
+  {
+  # 位置参数
+  loc<-para[1]+para[2]*dat$TOP[i]+para[3]*dat$TOP[i]^2+para[4]*dat$TOP[i]^3+para[5]*dat$TOP[i]^4+para[6]*(year(dat$DATE[i])-2015)+para[7]*dat$lag1[i]+para[8]*dat$lag2[i]
+  # 尺度参数
+  scale<-para[9]+ para[10]*dat$TOP[i]+para[11]*dat$TOP[i]^2+para[12]*dat$TOP[i]^3+para[13]*dat$TOP[i]^4
+  # 形状参数
+  shape<-para[14]
+  if(shape == 0)
+    dat$pred[i]<-loc
+  else
+    dat$pred[i]<-loc+scale*((1+loc)^(-loc)-1)/loc
+  #dat$pred[i]<-qevd(0.95,loc=loc,scale=scale,shape=shape,type="GEV")
+  }
+  return(dat)
+  
+}
+# 预测
+predextreme1<-modepre1(frame,parameter4)[-(1:731),]
+# 输出结果
+exj1<-judge(predextreme1)
+summary(exj1$result)
+exj1$extrvalue
+```
+
+### 1天(a)结果可视化
+```{r}
+library(ggplot2)
+p<-ggplot(data=predextreme1)+
+ geom_line(aes(x=DATE,y=pred,color="predict"))+
+  geom_line(aes(x=DATE,y=LOAD,color="actual"))
+p
+```
+
+
+
+```{r}
+# 1天(b)模型的预测函数
+modepreyearly<-function(dat,para)
+{
+  for(i in 1:nrow(dat))
+  {
+  loc<-para[1]+para[2]*dat$TOP[i]+para[3]*dat$TOP[i]^2+para[4]*dat$TOP[i]^3+para[5]*dat$TOP[i]^4+para[6]*(year(dat$DATE[i])-2015)+para[7]*dat$lag365[i]
+  scale<-para[8]+ para[9]*dat$TOP[i]+para[10]*dat$TOP[i]^2+para[11]*dat$TOP[i]^3+para[12]*dat$TOP[i]^4
+  shape<-para[13]
+  if(shape == 0)
+    dat$pred[i]<-loc
+  else
+    dat$pred[i]<-loc+scale*((1+loc)^(-loc)-1)/loc
+  #dat$pred[i]<-qevd(0.95,loc=loc,scale=scale,shape=shape,type="GEV")
+  }
+  return(dat)
+  
+}
+
+```
+
+
+##假设检验
+### GEV 变量 likelihood ratio test
+## 温度检验
+```{r,warning=FALSE}
+fit1<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitcl1<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitcl2<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitcl3<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitcl4<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitcl<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~TOP+ I(TOP^2)+I(TOP^4)+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+
+lr.test(fit1,fitcl1) #一阶温度
+lr.test(fitcl1,fitcl2) #二阶温度
+lr.test(fitcl2,fitcl3) #三阶温度
+lr.test(fitcl3,fitcl4) #四阶温度
+lr.test(fitcl,fitcl4) #去掉任意一阶
+```
+## 趋势检验
+```{r,warning=FALSE}
+fit2<-fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+lr.test(fitcl4,fit2)
+```
+
+```{r}
+# fitlagt<-fevd(LOAD,data= frameselect,type="GEV",
+#              location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag1+lag2+lagt,
+#              scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+#              time.units = "days")
+# 
+# lr.test(fit4,fitlagt)
+```
+
+## 二阶检验
+```{r,warning=FALSE}
+lr.test(fit2,fit4) 
+```
+## 三阶检验
+```{r,warning=FALSE}
+fit3 <- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag1+lag2+lag3,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+lr.test(fit4,fit3) 
+```
+
+## 滞后项选择 
+- 短期预测
+```{r,warning=FALSE}
+fitlag7 <- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag7,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitlag8 <- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag7+lag8,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+fitlag0 <- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015),
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+lr.test(fitlag0,fitlag7) #一周预测
+lr.test(fitlag7,fitlag8)
+```
+
+```{r,warning=FALSE}
+fitlag365 <- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag365,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+lr.test(fitlag0,fitlag365)
+```
+
+```{r,warning=FALSE}
+fitall<- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag365+lag1+lag2+lag7,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+lr.test(fitlag365,fitall)
+```
+
+
+```{r}
+#模型预测  包括温度 滞后1，2， 7，365 的用电量
+modepreall<-function(dat,para)
+{
+  for(i in 1:nrow(dat))
+  {
+  loc<-para[1]+para[2]*dat$TOP[i]+para[3]*dat$TOP[i]^2+para[4]*dat$TOP[i]^3+para[5]*dat$TOP[i]^4+para[6]*dat$lag365[i]+para[7]*dat$lag1[i]+para[8]*dat$lag2[i]+para[9]*dat$lag7[i]
+  scale<-para[10]+ para[11]*dat$TOP[i]+para[12]*dat$TOP[i]^2+para[13]*dat$TOP[i]^3+para[14]*dat$TOP[i]^4
+  shape<-para[15]
+  if(shape == 0)
+    dat$pred[i]<-loc
+  else
+    dat$pred[i]<-loc+scale*((1+loc)^(-loc)-1)/loc
+  #dat$pred[i]<-qevd(0.95,loc=loc,scale=scale,shape=shape,type="GEV")
+  }
+  return(dat)
+  
+}
+temp<-modepreall(frame,fitall$results$par)
+```
+
+
+```{r}
+#回归函数 包括温度 滞后1，2， 7，365 的用电量
+#对指定年份分析
+extremeMethodall<-function(year,DataFrame) 
+  #DataFrame with lag, temperature, date,and Load.
+{
+  frameselect<-subset(DataFrame,DATE>=date(paste(year-2,"-01-01",sep=""))  & DATE<    date(paste(year,"-01-01",sep="")))
+  fit <- fevd(LOAD,data= frameselect[frameselect$lag365 > 0,],type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+lag365+lag1+lag2+lag7,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+  parameter<-fit$results$par
+  predextreme1<-modepreall(DataFrame,parameter)[DataFrame$DATE >=date(paste(year,"-01-01",sep="")) &
+                                           DataFrame$DATE <=date(paste(year,"-12-31",sep="")) ,]
+  return(predextreme1)
+  
+}
+```
+
+```{r,warning=FALSE}
+error2017all<-extremeMethodall(2017,frame)
+summary(judge(error2017all)$result)
+judge(error2017all)$extrvalue
+```
+
+```{r}
+#模型预测  包括温度 滞后1，365 的用电量
+modepreall1365<-function(dat,para)
+{
+  for(i in 1:nrow(dat))
+  {
+  loc<-para[1]+para[2]*dat$TOP[i]+para[3]*dat$TOP[i]^2+para[4]*dat$TOP[i]^3+para[5]*dat$TOP[i]^4+para[6]*dat$lag365[i]+para[7]*dat$lag1[i]
+  scale<-para[8]+ para[9]*dat$TOP[i]+para[10]*dat$TOP[i]^2+para[11]*dat$TOP[i]^3+para[12]*dat$TOP[i]^4
+  shape<-para[13]
+  if(shape == 0)
+    dat$pred[i]<-loc
+  else
+    dat$pred[i]<-loc+scale*((1+loc)^(-loc)-1)/loc
+  #dat$pred[i]<-qevd(0.95,loc=loc,scale=scale,shape=shape,type="GEV")
+  }
+  return(dat)
+  
+}
+```
+
+```{r}
+extremeMethodall1365<-function(year,DataFrame) #DataFrame with lag, temperature, date,and Load.
+{
+  frameselect<-subset(DataFrame,DATE>=date(paste(year-2,"-01-01",sep=""))  & DATE<    date(paste(year,"-01-01",sep="")))
+  fit <- fevd(LOAD,data= frameselect[frameselect$lag365 > 0,],type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+lag365+lag1,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+  parameter<-fit$results$par
+  predextreme1<-modepreall1365(DataFrame,parameter)[DataFrame$DATE >=date(paste(year,"-01-01",sep="")) &
+                                           DataFrame$DATE <=date(paste(year,"-12-31",sep="")) ,]
+  return(predextreme1)
+  
+}
+```
+
+```{r,warning=FALSE}
+error2017all<-extremeMethodall1365(2017,frame)
+w<-which(error2017all$DATE >="2017-07-01" & error2017all$DATE <="2017-09-01")
+summary(judge(error2017all[w,])$result)
+#judge(error2017all)$extrvalue
+```
+
+```{r}
+#低于5%的天数
+sum(judge(error2017all)$result <0.05)/365
+#低于10%的天数
+sum(judge(error2017all)$result < 0.1)/365
+```
+
+# 最终我们选择的变量 温度1-4次幂，趋势(年份)，一阶，二阶滞后项
+
+### 对于后一天的预测 一天(a)
+```{r}
+# 一天(a)的回归函数
+extremeMethod<-function(year,DataFrame) #DataFrame with lag, temperature, date,and Load.
+{
+  frameselect<-subset(DataFrame,DATE>=date(paste(year-2,"-01-01",sep=""))  & DATE<    date(paste(year,"-01-01",sep="")))
+  fit <- fevd(LOAD,data= frameselect,type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag1+lag2,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+  parameter<-fit$results$par
+  predextreme1<-modepre1(DataFrame,parameter)[DataFrame$DATE >=date(paste(year,"-01-01",sep="")) &
+                                           DataFrame$DATE <=date(paste(year,"-12-31",sep="")) ,]
+  return(predextreme1)
+  
+}
+```
+
+## 预测效果
+用2015，2016年数据预测2017
+```{r,warning=FALSE}
+error2017<-extremeMethod(2017,frame)
+w<-which(error2017$DATE >="2017-07-01" & error2017$DATE <="2017-09-01")
+summary(judge(error2017[w,])$result)
+judge(error2017)$extrvalue
+library(ggplot2)
+  p<-ggplot(data=error2017)+
+    geom_line(aes(x=DATE,y=pred,color="predict"))+
+    geom_line(aes(x=DATE,y=LOAD,color="actual"))
+  p
+```
+```{r}
+#低于5%的天数
+sum(judge(error2017)$result <0.05)/365
+#低于10%的天数
+sum(judge(error2017)$result < 0.1)/365
+```
+
+```{r}
+ggplot()+geom_point(aes(x=error2017$DATE, y=abs(error2017$pred-error2017$LOAD)/error2017$LOAD, col="pred"))
+```
+
+用2016，2017年数据预测2018
+```{r,warning=FALSE}
+error2018<-extremeMethod(2018,frame)
+summary(judge(error2018)$result)
+judge(error2018)$extrvalue
+library(ggplot2)
+  p<-ggplot(data=error2018)+
+    geom_line(aes(x=DATE,y=pred,color="predict"))+
+    geom_line(aes(x=DATE,y=LOAD,color="actual"))
+  p
+```
+
+###对于下一周的预测 7天模型
+
+```{r,warning=FALSE}
+#回归函数  7天模型 7天滞后项 趋势
+extremeMethodweekly<-function(year,DataFrame) #DataFrame with lag, temperature, date,and Load.
+{
+  frameselect<-subset(DataFrame,DATE>=date(paste(year-2,"-01-01",sep=""))  & DATE<    date(paste(year,"-01-01",sep="")))
+  fit <- fevd(LOAD,data= frameselect[frameselect$lag7 !=0,],type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag7,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+  parameter<-fit$results$par
+  predextreme1<-modepreweekly(DataFrame,parameter)[DataFrame$DATE >=date(paste(year,"-01-01",sep="")) &
+                                           DataFrame$DATE <=date(paste(year,"-12-31",sep="")) ,]
+  return(predextreme1)
+  
+}
+
+# 7天模型的预测
+modepreweekly<-function(dat,para)
+{
+  for(i in 1:nrow(dat))
+  {
+  loc<-para[1]+para[2]*dat$TOP[i]+para[3]*dat$TOP[i]^2+para[4]*dat$TOP[i]^3+para[5]*dat$TOP[i]^4+para[6]*(year(dat$DATE[i])-2015)+para[7]*dat$lag7[i]
+  scale<-para[8]+ para[9]*dat$TOP[i]+para[10]*dat$TOP[i]^2+para[11]*dat$TOP[i]^3+para[12]*dat$TOP[i]^4
+  shape<-para[13]
+  if(shape == 0)
+    dat$pred[i]<-loc
+  else
+    dat$pred[i]<-loc+scale*((1+loc)^(-loc)-1)/loc
+  #dat$pred[i]<-qevd(0.95,loc=loc,scale=scale,shape=shape,type="GEV")
+  }
+  return(dat)
+  
+}
+
+error2017<-extremeMethodweekly(2017,frame)
+summary(judge(error2017)$result)
+judge(error2017)$extrvalue
+  p<-ggplot(data=error2017)+
+    geom_line(aes(x=DATE,y=pred,color="predict"))+
+    geom_line(aes(x=DATE,y=LOAD,color="actual"))
+  p
+```
+
+
+```{r}
+#低于5%的天数
+sum(judge(error2017)$result <0.05)/365
+#低于10%的天数
+sum(judge(error2017)$result < 0.1)/365
+```
+
+```{r}
+ggplot()+geom_point(aes(x=error2017$pred, y=abs(error2017$pred-error2017$LOAD)/error2017$LOAD, col="pred"))
+```
+
+```{r}
+error2018<-extremeMethodweekly(2018,frame)
+summary(judge(error2018)$result)
+judge(error2018)$extrvalue
+library(ggplot2)
+  p<-ggplot(data=error2018)+
+    geom_line(aes(x=DATE,y=pred,color="predict"))+
+    geom_line(aes(x=DATE,y=LOAD,color="actual"))
+  p
+```
+
+```{r}
+extremeMethodyearly<-function(year,DataFrame) #DataFrame with lag, temperature, date,and Load.
+{
+  frameselect<-subset(DataFrame,DATE>=date(paste(year-2,"-01-01",sep=""))  & DATE<    date(paste(year,"-01-01",sep="")))
+  fit <- fevd(LOAD,data= frameselect[frameselect$lag365 !=0,],type="GEV",
+             location.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4)+I(year(DATE)-2015)+lag365,
+             scale.fun= ~ TOP+I(TOP^2)+I(TOP^3)+I(TOP^4),
+             time.units = "days")
+  parameter<-fit$results$par
+  predextreme1<-modepreyearly(DataFrame,parameter)[DataFrame$DATE >=date(paste(year,"-01-01",sep="")) &
+                                           DataFrame$DATE <=date(paste(year,"-12-31",sep="")),]
+  return(predextreme1)
+}
+```
+
+
+```{r}
+error2017<-extremeMethodyearly(2017,frame)
+summary(judge(error2017)$result)
+judge(error2017)$extrvalue
+library(ggplot2)
+p<-ggplot(data=error2017)+
+  geom_line(aes(x=DATE,y=pred,color="predict"))+
+  geom_line(aes(x=DATE,y=LOAD,color="actual"))
+p
+```
+```{r}
+#低于5%的天数
+sum(judge(error2017)$result <0.05)/365
+#低于10%的天数
+sum(judge(error2017)$result < 0.1)/365
+```
+
+```{r}
+error2018<-extremeMethodyearly(2018,frame)
+summary(judge(error2018)$result)
+judge(error2018)$extrvalue
+p<-ggplot(data=error2018)+
+    geom_line(aes(x=DATE,y=pred,color="predict"))+
+    geom_line(aes(x=DATE,y=LOAD,color="actual"))
+p
+```
+
+### 对于温度变化的敏感性
+```{r}
+sensitivity<-function(func)
+{
+sensmean<-vector()
+sensmax<-vector()
+for(temperaturesd in seq(0,5,0.5))
+{
+  sensmeantemp<-vector()
+  sensmaxtemp<-vector()
+  print(temperaturesd)
+  for(i in 1:100)
+  {
+    frametest<-frame
+    w<-which(frametest$DATE >= "2017-01-01")
+    frametest$TOP[w]
+    frametest$TOP[w]<-frametest$TOP[w]+rnorm(length(frametest$TOP[w]),0,temperaturesd)
+    frametest$TOP[w]
+    error2017<-func(2017,frametest)
+    judgement<-judge(error2017)$result
+    sensmeantemp<-c(sensmean,mean(judgement))
+    sensmaxtemp<-c(sensmax,max(judgement))
+  }
+  sensmean<-c(sensmean,mean(sensmeantemp))
+  sensmax<-c(sensmax,mean(sensmaxtemp))
+}
+return(list(sensmean=sensmean,sensmax=sensmax))
+}
+
+```
+
+```{r}
+week<-sensitivity(extremeMethodweekly)
+```
+
+```{r}
+library(ggplot2)
+p<-ggplot()+
+  geom_line(aes(x=seq(0,5,0.5),y=week$sensmean,color="mean"))+ylab("mean")
+p
+p<-ggplot()+  geom_line(aes(x=seq(0,5,0.5),y=week$sensmax,color="max"))+ylab("max")
+p
+```
+
+```{r}
+day<-sensitivity(extremeMethod)
+```
+
+```{r}
+library(ggplot2)
+p<-ggplot()+
+  geom_line(aes(x=seq(0,5,0.5),y=day$sensmean,color="mean"))+ylab("mean")
+p
+p<-ggplot()+  geom_line(aes(x=seq(0,5,0.5),y=day$sensmax,color="max"))+ylab("max")
+p
+```
